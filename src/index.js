@@ -189,8 +189,8 @@ async function answerInline(queryId, results, env) {
 
 // ─── تنظیم Webhook ───
 async function setupWebhook(env) {
-  // آدرس Worker رو از هدر Cloudflare بگیر
-  const workerUrl = env.WORKER_URL || `https://pm-f17.workers.dev`;
+  // آدرس Worker
+  const workerUrl = env.WORKER_URL || `https://uctranslate.hadis-vpm-f17.workers.dev`;
   const webhookUrl = `${workerUrl}${WEBHOOK_PATH}`;
   const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/setWebhook?url=${webhookUrl}&allowed_updates=["message","inline_query"]`);
   const data = await res.json();
