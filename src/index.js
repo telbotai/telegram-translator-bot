@@ -1,72 +1,43 @@
 // Telegram Translation Bot - Cloudflare Workers
-// قانون ساده: فارسی → انگلیسی | هر زبان دیگه → فارسی
+// فارسی → انگلیسی | هر زبان دیگه → فارسی
+// پشتیبانی: چت خصوصی + گروه با /t + حالت اینلاین
 
 const WEBHOOK_PATH = '/webhook';
 
-// تشخیص زبان فارسی/عربی/اردو
+// تشخیص فارسی/عربی
 const PERSIAN_PATTERN = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/;
-
-// تشخیص زبان انگلیسی
-const ENGLISH_PATTERN = /^[a-zA-Z\s\d\.\,\!\?\;\:\'\"\-\(\)\/\@\#\$\%\^\&\*\+\=\[\]\{\}\|\\\<\>\~\`]+$/;
-
-// تشخیص زبان چینی
-const CHINESE_PATTERN = /[\u4E00-\u9FFF\u3400-\u4DBF]/;
-
-// تشخیص زبان ژاپنی
-const JAPANESE_PATTERN = /[\u3040-\u309F\u30A0-\u30FF]/;
-
-// تشخیص زبان کره‌ای
-const KOREAN_PATTERN = /[\uAC00-\uD7AF\u1100-\u11FF]/;
-
-// تشخیص زبان روسی/اوکراینی
-const CYRILLIC_PATTERN = /[\u0400-\u04FF]/;
-
-// تشخیص زبان هندی
-const HINDI_PATTERN = /[\u0900-\u097F]/;
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-
-    // Webhook
     if (url.pathname === WEBHOOK_PATH && request.method === 'POST') {
       return handleWebhook(request, env);
     }
-
-    // Setup webhook
-    if (url.pathname === '/setup') {
-      return setupWebhook(env);
-    }
-
-    // Health check
-    if (url.pathname === '/health') {
-      return new Response('Bot is running! 🦉', { status: 200 });
-    }
-
+    if (url.pathname === '/setup') return setupWebhook(env);
+    if (url.pathname === '/health') return new Response('OK 🦉', { status: 200 });
     return new Response('Translation Bot 🌐', { status: 200 });
   }
 };
 
-// Webhook handler
+// ─── Webhook ───
 async function handleWebhook(request, env) {
   try {
     const update = await request.json();
-    if (update.message) {
-      await handleMessage(update.message, env);
-    }
+    if (update.message) await handleMessage(update.message, env);
+    if (update.inline_query) await handleInlineQuery(update.inline_query, env);
     return new Response('OK');
   } catch (e) {
     return new Response('Error', { status: 500 });
   }
 }
 
-// اصلی‌ترین تابع - مدیریت پیام‌ها
+// ─── مدیریت پیام‌ها ───
 async function handleMessage(msg, env) {
   const chatId = msg.chat.id;
   const text = msg.text;
-  const chatType = msg.chat.type; // private, group, supergroup
+  const chatType = msg.chat.type;
 
-  // دستورات
+  // ─── دستورات ───
   if (text && text.startsWith('/')) {
     const cmd = text.split('@')[0].split(' ')[0].toLowerCase();
 
@@ -75,109 +46,122 @@ async function handleMessage(msg, env) {
 
 من ربات مترجم هوشمندم.
 
-📌 در چت خصوصی:
-هر متنی بفرستید خودکار ترجمه می‌شه:
+📌 چت خصوصی:
+هر متنی بفرستید → خودکار ترجمه:
 • فارسی → انگلیسی
-• انگلیسی/هر زبان دیگه → فارسی
+• هر زبان دیگه → فارسی
 
-📌 در گروه‌ها:
-روی پیام مورد نظر ریپلای کنید و بفرستید:
-/t
+📌 گروه‌ها (وقتی ربات عضو هست):
+ریپلای + /t → ترجمه
 
-🎯 همین! ساده و سریع.`, env);
+📌 اینلاین (هر جا):
+@بات_نام متن
+ترجمه توی هر چتی نشون داده می‌شه!`, env);
       return;
     }
 
     if (cmd === '/help') {
       await send(chatId, `📖 راهنما:
 
-🔹 چت خصوصی:
-هر متنی بفرستید → خودکار ترجمه
+🔹 چت خصوصی → خودکار
+🔹 گروه → ریپلای + /t
+🔹 اینلاین → @بات_نام متن
 
-🔹 گروه‌ها:
-ریپلای + /t → ترجمه
-
-🔹 قانون ترجمه:
-• فارسی → انگلیسی
-• هر زبان دیگه → فارسی`, env);
+🎯 قانون:
+فارسی → انگلیسی
+بقیه → فارسی`, env);
       return;
     }
 
-    // /t در گروه فقط
+    // /t در گروه
     if (cmd === '/t') {
       if (chatType === 'group' || chatType === 'supergroup') {
-        // بررسی کن آیا ریپلای شده
         if (msg.reply_to_message && msg.reply_to_message.text) {
-          const originalText = msg.reply_to_message.text;
-          const senderName = msg.reply_to_message.from.first_name || '';
-          const result = await translateSmart(originalText);
+          const result = await translateSmart(msg.reply_to_message.text);
           await send(chatId, `🌐 ${result}`, env);
         } else {
-          await send(chatId, `⚠️ باید روی پیام مورد نظر ریپلای کنید و /t بزنید.`, env);
+          await send(chatId, `⚠️ روی پیام ریپلای کنید و /t بزنید.`, env);
         }
       } else {
-        await send(chatId, `⚠️ این دستور فقط در گروه‌ها کار می‌کنه.
-
-در چت خصوصی هر متنی بفرستید خودکار ترجمه می‌شه!`, env);
+        await send(chatId, `⚠️ در چت خصوصی هر متنی بفرستید خودکار ترجمه می‌شه!`, env);
       }
       return;
     }
   }
 
-  // پیام معمولی (فقط چت خصوصی)
+  // ─── پیام معمولی (فقط خصوصی) ───
   if (text && chatType === 'private') {
     const result = await translateSmart(text);
     await send(chatId, result, env);
   }
 }
 
-// تابع ترجمه هوشمند
-// قانون: فارسی → انگلیسی | هر چیز دیگه → فارسی
+// ─── حالت اینلاین ───
+// کاربر می‌نویسه: @بات_نام متن
+// ربات ترجمه رو به صورت نتیجه نشون می‌ده
+async function handleInlineQuery(query, env) {
+  const text = query.query.trim();
+  const queryId = query.id;
+
+  // اگه متنی وارد نشده
+  if (!text) {
+    await answerInline(queryId, [{
+      type: 'article',
+      id: 'help',
+      title: '🌐 ترجمه هوشمند',
+      description: 'متن رو بنویسید تا ترجمه بشه',
+      input_message_content: {
+        message_text: '📝 متنی بنویسید بعد از @بات_نام'
+      }
+    }], env);
+    return;
+  }
+
+  // ترجمه متن
+  const result = await translateSmart(text);
+  const isPersian = PERSIAN_PATTERN.test(text);
+  const direction = isPersian ? 'فارسی → انگلیسی' : 'به فارسی';
+
+  await answerInline(queryId, [{
+    type: 'article',
+    id: 'translation',
+    title: `🌐 ${result.substring(0, 50)}`,
+    description: `${direction}: ${text.substring(0, 40)}...`,
+    input_message_content: {
+      message_text: `🌐 ${result}`
+    }
+  }], env);
+}
+
+// ─── ترجمه هوشمند ───
 async function translateSmart(text) {
   const isPersian = PERSIAN_PATTERN.test(text);
 
   if (isPersian) {
-    // فارسی → انگلیسی
-    const translated = await translate(text, 'fa', 'en');
-    return translated || '❌ خطا در ترجمه';
+    const r = await translate(text, 'fa', 'en');
+    return r || '❌ خطا در ترجمه';
   } else {
-    // هر زبان دیگه → فارسی
-    const translated = await translate(text, 'auto', 'fa');
-    return translated || '❌ خطا در ترجمه';
+    const r = await translate(text, 'auto', 'fa');
+    return r || '❌ خطا در ترجمه';
   }
 }
 
-// ترجمه با MyMemory API (رایگان)
+// ─── MyMemory API (رایگان) ───
 async function translate(text, from, to) {
   try {
     const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${to}`;
     const res = await fetch(url);
     const data = await res.json();
-
     if (data.responseStatus === 200 && data.responseData) {
-      const result = data.responseData.translatedText;
-
-      // اگه ترجمه فرقی نکرد، یعنی شاید منبع اشتباه بود
-      if (result.toLowerCase() === text.toLowerCase()) {
-        // سعی کن از منبع دیگه ترجمه کنه
-        const url2 = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|fa`;
-        const res2 = await fetch(url2);
-        const data2 = await res2.json();
-        if (data2.responseStatus === 200 && data2.responseData) {
-          return data2.responseData.translatedText;
-        }
-      }
-
-      return result;
+      return data.responseData.translatedText;
     }
     return null;
   } catch (e) {
-    console.error('Translation error:', e);
     return null;
   }
 }
 
-// ارسال پیام
+// ─── ارسال پیام ───
 async function send(chatId, text, env) {
   await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
     method: 'POST',
@@ -190,11 +174,23 @@ async function send(chatId, text, env) {
   });
 }
 
-// تنظیم webhook
-async function setupWebhook(env) {
-  const workerUrl = env.WORKER_URL || `https://${env.CF_WORKER_NAME || 'translator-bot'}.YOUR_SUBDOMAIN.workers.dev`;
-  const webhookUrl = `${workerUrl}${WEBHOOK_PATH}`;
+// ─── پاسخ اینلاین ───
+async function answerInline(queryId, results, env) {
+  await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/answerInlineQuery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      inline_query_id: queryId,
+      results: results,
+      cache_time: 1
+    })
+  });
+}
 
+// ─── تنظیم Webhook ───
+async function setupWebhook(env) {
+  const workerUrl = env.WORKER_URL || `https://translator-bot.${env.CF_SUBDOMAIN || 'YOUR_SUBDOMAIN'}.workers.dev`;
+  const webhookUrl = `${workerUrl}${WEBHOOK_PATH}`;
   const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
   const data = await res.json();
   return new Response(JSON.stringify(data, null, 2), {
