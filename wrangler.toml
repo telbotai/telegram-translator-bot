@@ -1,0 +1,11 @@
+name = "telegram-translator-bot"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# Translation API - MyMemory (free, no key needed)
+# Rate limit: 5000 chars/day free
+
+# KV namespace for user preferences (create after deploy)
+# [[kv_namespaces]]
+# binding = "USER_PREFS"
+# id = "your_kv_namespace_id"
