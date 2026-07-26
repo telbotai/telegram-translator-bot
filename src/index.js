@@ -1,5 +1,5 @@
-// Telegram Translation Bot - Cloudflare Workers
-// فارسی → انگلیسی | هر زبان دیگه → فارسی
+// Telegram Voice Clone Bot - Cloudflare Workers
+// ویس بفرست + متن بفرست = با همون صدا می‌خونه!
 
 const WEBHOOK_PATH = '/webhook';
 const PERSIAN_PATTERN = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/;
@@ -12,7 +12,7 @@ export default {
     }
     if (url.pathname === '/setup') return setupWebhook(env);
     if (url.pathname === '/health') return new Response('OK 🦉', { status: 200 });
-    return new Response('Translation Bot 🌐', { status: 200 });
+    return new Response('Voice Clone Bot 🎤', { status: 200 });
   }
 };
 
@@ -21,9 +21,9 @@ async function handleWebhook(request, env) {
   try {
     const update = await request.json();
     if (update.message) await handleMessage(update.message, env);
-    if (update.inline_query) await handleInlineQuery(update.inline_query, env);
     return new Response('OK');
   } catch (e) {
+    console.error('Webhook error:', e);
     return new Response('Error', { status: 500 });
   }
 }
@@ -31,207 +31,291 @@ async function handleWebhook(request, env) {
 // ─── مدیریت پیام‌ها ───
 async function handleMessage(msg, env) {
   const chatId = msg.chat.id;
+  const userId = msg.from.id;
   const text = msg.text;
-  const chatType = msg.chat.type;
 
+  // ─── دستورات ───
   if (text && text.startsWith('/')) {
     const cmd = text.split('@')[0].split(' ')[0].toLowerCase();
 
     if (cmd === '/start') {
-      await send(chatId, `🌐 سلام!
+      await send(chatId, `🎤 سلام!
 
-من ربات مترجم هوشمندم.
+من ربات کلون صدا هستم!
 
-📌 چت خصوصی:
-هر متنی بفرستید → خودکار ترجمه:
-• فارسی → انگلیسی
-• هر زبان دیگه → فارسی
+📌 نحوه استفاده:
+۱. یه پیام صوتی بفرست (نمونه صدا)
+۲. متنی که می‌خوای با اون صدا خونده بشه رو بنویس
+۳. من متن رو با صدای تو می‌خونم! 🎙️
 
-📌 گروه‌ها:
-ریپلای + /t → ترجمه
-
-📌 اینلاین:
-@بات_نام متن`, env);
+📝 دستورات:
+/start - شروع
+/help - راهنما
+/voices - لیست صداهای ذخیره شده
+/delete - حذف صدای ذخیره شده`, env);
       return;
     }
 
     if (cmd === '/help') {
       await send(chatId, `📖 راهنما:
-🔹 چت خصوصی → خودکار
-🔹 گروه → ریپلای + /t
-🔹 اینلاین → @بات_نام متن`, env);
+
+🔹 مرحله ۱: یه پیام صوتی بفرست
+(حداقل ۳ ثانیه باشه)
+
+🔹 مرحله ۲: متن بنویس
+(فارسی یا انگلیسی)
+
+🔹 مرحله ۳: ربات متن رو با صدای تو می‌خونه!
+
+⚠️ نکات:
+• هر بار پیام صوتی بفرستی، صدای جدید کلون می‌شه
+• حداکثر ۱۰,۰۰۰ کاراکتر در ماه (رایگان)
+• فرمت‌های پشتیبانی: OGG, MP3, WAV, M4A`, env);
       return;
     }
 
-    if (cmd === '/t') {
-      if (chatType === 'group' || chatType === 'supergroup') {
-        if (msg.reply_to_message && msg.reply_to_message.text) {
-          const result = await translateSmart(msg.reply_to_message.text);
-          await send(chatId, `🌐 ${result}`, env);
-        } else {
-          await send(chatId, `⚠️ روی پیام ریپلای کنید و /t بزنید.`, env);
-        }
+    if (cmd === '/voices') {
+      const voices = await getUserVoices(userId, env);
+      if (voices.length === 0) {
+        await send(chatId, `⚠️ هنوز صدایی ذخیره نکردید!
+
+یه پیام صوتی بفرستید تا صداتون کلون بشه.`, env);
       } else {
-        await send(chatId, `⚠️ در چت خصوصی هر متنی بفرستید خودکار ترجمه می‌شه!`, env);
+        let list = '🎙️ صداهای ذخیره شده:\n\n';
+        voices.forEach((v, i) => {
+          list += `${i + 1}. ${v.name} (${v.language})\n`;
+        });
+        list += '\n📞 برای حذف: /delete';
+        await send(chatId, list, env);
       }
       return;
     }
+
+    if (cmd === '/delete') {
+      await deleteUserVoices(userId, env);
+      await send(chatId, `✅ همه صداهای ذخیره شده حذف شد.`, env);
+      return;
+    }
   }
 
-  // پیام معمولی (فقط خصوصی)
-  if (text && chatType === 'private') {
-    const result = await translateSmart(text);
-    await send(chatId, result, env);
-  }
-}
-
-// ─── اینلاین ───
-async function handleInlineQuery(query, env) {
-  const text = query.query.trim();
-  const queryId = query.id;
-
-  if (!text) {
-    await answerInline(queryId, [{
-      type: 'article', id: 'help',
-      title: '🌐 ترجمه هوشمند',
-      description: 'متن رو بنویسید تا ترجمه بشه',
-      input_message_content: { message_text: '📝 متنی بنویسید بعد از @بات_نام' }
-    }], env);
+  // ─── پیام صوتی → کلون صدا ───
+  if (msg.voice || msg.audio) {
+    await handleVoiceMessage(msg, env);
     return;
   }
 
-  const result = await translateSmart(text);
-
-  await answerInline(queryId, [{
-    type: 'article', id: 'translation',
-    title: `🌐 ${result.substring(0, 50)}`,
-    description: text.substring(0, 40),
-    input_message_content: { message_text: `🌐 ${result}` }
-  }], env);
-}
-
-// ─── ترجمه هوشمند ───
-async function translateSmart(text) {
-  const isPersian = PERSIAN_PATTERN.test(text);
-
-  if (isPersian) {
-    const r = await translateWithFallback(text, 'fa', 'en');
-    return r || '❌ خطا در ترجمه';
-  } else {
-    const r = await translateWithFallback(text, 'en', 'fa');
-    return r || '❌ خطا در ترجمه';
+  // ─── متن → تبدیل به صدا با کلون ───
+  if (text) {
+    await handleTextMessage(chatId, userId, text, env);
+    return;
   }
 }
 
-// ─── ترجمه با fallback ───
-async function translateWithFallback(text, from, to) {
-  // تلاش ۱: Lingva Translate (رایگان، open-source)
-  const r1 = await translateLingva(text, from, to);
-  if (r1) return r1;
+// ─── مدیریت پیام صوتی ───
+async function handleVoiceMessage(msg, env) {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const fileId = msg.voice ? msg.voice.file_id : msg.audio.file_id;
 
-  // تلاش ۲: Google Translate مستقیم
-  const r2 = await translateGoogleDirect(text, from, to);
-  if (r2) return r2;
+  await send(chatId, `⏳ در حال پردازش صدا...`, env);
 
-  // تلاش ۳: LibreTranslate (عمومی)
-  const r3 = await translateLibre(text, from, to);
-  if (r3) return r3;
-
-  return null;
-}
-
-// ─── Lingva Translate (اولویت اول) ───
-async function translateLingva(text, from, to) {
-  try {
-    // چندین instancia عمومی
-    const instances = [
-      'https://lingva.thedaviddelta.com',
-      'https://lingva.ml',
-      'https://lingva.kavin.rocks',
-    ];
-
-    for (const base of instances) {
-      try {
-        const url = `${base}/api/v1/${from}/${to}/${encodeURIComponent(text)}`;
-        const res = await fetch(url, {
-          signal: AbortSignal.timeout(5000),
-          headers: { 'User-Agent': 'TelegramBot/1.0' }
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          if (data.translation && data.translation !== text) {
-            return data.translation;
-          }
-        }
-      } catch (e) {
-        continue; // سعی کن اینستنس بعدی
-      }
-    }
-    return null;
-  } catch (e) {
-    return null;
+  // دانلود فایل صوتی از تلگرام
+  const audioBuffer = await downloadTelegramFile(fileId, env);
+  if (!audioBuffer) {
+    await send(chatId, `❌ خطا در دانلود فایل صوتی`, env);
+    return;
   }
+
+  // آپلود به ElevenLabs و کلون صدا
+  const voiceId = await createVoiceClone(userId, audioBuffer, env);
+  if (!voiceId) {
+    await send(chatId, `❌ خطا در کلون صدا. لطفاً دوباره امتحان کنید.`, env);
+    return;
+  }
+
+  await send(chatId, `✅ صدای شما کلون شد! 🎉
+
+حالا یه متن بنویسید تا با صدای شما خونده بشه.
+
+📝 مثال:
+سلام خوبی
+Hello how are you`, env);
 }
 
-// ─── Google Translate مستقیم ───
-async function translateGoogleDirect(text, from, to) {
-  try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(text)}`;
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(5000),
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-    });
+// ─── مدیریت پیام متنی ───
+async function handleTextMessage(chatId, userId, text, env) {
+  // بررسی کن صدا ذخیره شده
+  const voiceId = await getUserVoiceId(userId, env);
+  if (!voiceId) {
+    await send(chatId, `⚠️ اول یه پیام صوتی بفرستید تا صداتون کلون بشه!`, env);
+    return;
+  }
 
+  await send(chatId, `⏳ در حال ساخت صدا...`, env);
+
+  // تبدیل متن به صدا با کلون
+  const audioBuffer = await textToSpeech(text, voiceId, env);
+  if (!audioBuffer) {
+    await send(chatId, `❌ خطا در ساخت صدا`, env);
+    return;
+  }
+
+  // ارسال فایل صوتی
+  await sendVoice(chatId, audioBuffer, env);
+}
+
+// ─── دانلود فایل از تلگرام ───
+async function downloadTelegramFile(fileId, env) {
+  try {
+    // گرفتن اطلاعات فایل
+    const fileRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${fileId}`);
+    const fileData = await fileRes.json();
+
+    if (!fileData.ok) return null;
+
+    const filePath = fileData.result.file_path;
+    const fileUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${filePath}`;
+
+    // دانلود فایل
+    const res = await fetch(fileUrl);
     if (!res.ok) return null;
 
-    const data = await res.json();
-    if (data && data[0]) {
-      const translated = data[0].map(p => p[0]).join('');
-      if (translated && translated !== text) return translated;
-    }
+    return await res.arrayBuffer();
+  } catch (e) {
+    console.error('Download error:', e);
     return null;
+  }
+}
+
+// ─── کلون صدا با ElevenLabs ───
+async function createVoiceClone(userId, audioBuffer, env) {
+  try {
+    // نام صدا
+    const voiceName = `user_${userId}_${Date.now()}`;
+
+    // آپلود برای کلون
+    const formData = new FormData();
+    formData.append('name', voiceName);
+    formData.append('files', new Blob([audioBuffer], { type: 'audio/ogg' }), 'sample.ogg');
+
+    const res = await fetch('https://api.elevenlabs.io/v1/voices/add', {
+      method: 'POST',
+      headers: {
+        'xi-api-key': env.ELEVENLABS_API_KEY,
+      },
+      body: formData
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error('ElevenLabs error:', err);
+      return null;
+    }
+
+    const data = await res.json();
+    const voiceId = data.voice_id;
+
+    // ذخیره voiceId برای کاربر
+    await saveUserVoiceId(userId, voiceId, env);
+
+    return voiceId;
+  } catch (e) {
+    console.error('Clone error:', e);
+    return null;
+  }
+}
+
+// ─── تبدیل متن به صدا ───
+async function textToSpeech(text, voiceId, env) {
+  try {
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': env.ELEVENLABS_API_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text: text,
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+          style: 0.5,
+          use_speaker_boost: true
+        }
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error('TTS error:', err);
+      return null;
+    }
+
+    return await res.arrayBuffer();
+  } catch (e) {
+    console.error('TTS error:', e);
+    return null;
+  }
+}
+
+// ─── ذخیره و بازیابی صدا ───
+async function saveUserVoiceId(userId, voiceId, env) {
+  try {
+    // ذخیره آخرین voiceId
+    await env.USER_PREFS.put(`voice:${userId}`, voiceId);
+
+    // اضافه کردن به لیست صداها
+    const listKey = `voices:${userId}`;
+    const existing = await env.USER_PREFS.get(listKey);
+    const voices = existing ? JSON.parse(existing) : [];
+    voices.push({
+      voiceId: voiceId,
+      name: `صدای ${voices.length + 1}`,
+      created: new Date().toISOString()
+    });
+    await env.USER_PREFS.put(listKey, JSON.stringify(voices));
+  } catch (e) {
+    console.error('Save error:', e);
+  }
+}
+
+async function getUserVoiceId(userId, env) {
+  try {
+    return await env.USER_PREFS.get(`voice:${userId}`);
   } catch (e) {
     return null;
   }
 }
 
-// ─── LibreTranslate (عمومی) ───
-async function translateLibre(text, from, to) {
+async function getUserVoices(userId, env) {
   try {
-    const instances = [
-      'https://libretranslate.com',
-      'https://translate.fortytwo-it.com',
-    ];
-
-    for (const base of instances) {
-      try {
-        const url = `${base}/translate`;
-        const res = await fetch(url, {
-          method: 'POST',
-          signal: AbortSignal.timeout(5000),
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            q: text,
-            source: from,
-            target: to,
-            format: 'text'
-          })
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          if (data.translatedText && data.translatedText !== text) {
-            return data.translatedText;
-          }
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-    return null;
+    const data = await env.USER_PREFS.get(`voices:${userId}`);
+    return data ? JSON.parse(data) : [];
   } catch (e) {
-    return null;
+    return [];
+  }
+}
+
+async function deleteUserVoices(userId, env) {
+  try {
+    const voices = await getUserVoices(userId, env);
+
+    // حذف از ElevenLabs
+    for (const v of voices) {
+      try {
+        await fetch(`https://api.elevenlabs.io/v1/voices/${v.voiceId}`, {
+          method: 'DELETE',
+          headers: { 'xi-api-key': env.ELEVENLABS_API_KEY }
+        });
+      } catch (e) {}
+    }
+
+    // حذف از KV
+    await env.USER_PREFS.delete(`voice:${userId}`);
+    await env.USER_PREFS.delete(`voices:${userId}`);
+  } catch (e) {
+    console.error('Delete error:', e);
   }
 }
 
@@ -248,16 +332,15 @@ async function send(chatId, text, env) {
   });
 }
 
-// ─── پاسخ اینلاین ───
-async function answerInline(queryId, results, env) {
-  await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/answerInlineQuery`, {
+// ─── ارسال صدا ───
+async function sendVoice(chatId, audioBuffer, env) {
+  const formData = new FormData();
+  formData.append('chat_id', chatId);
+  formData.append('voice', new Blob([audioBuffer], { type: 'audio/ogg' }), 'voice.ogg');
+
+  await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendVoice`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      inline_query_id: queryId,
-      results: results,
-      cache_time: 1
-    })
+    body: formData
   });
 }
 
@@ -265,7 +348,7 @@ async function answerInline(queryId, results, env) {
 async function setupWebhook(env) {
   const workerUrl = env.WORKER_URL || `https://uctranslate.hadis-vpm-f17.workers.dev`;
   const webhookUrl = `${workerUrl}${WEBHOOK_PATH}`;
-  const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/setWebhook?url=${webhookUrl}&allowed_updates=["message","inline_query"]`);
+  const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/setWebhook?url=${webhookUrl}&allowed_updates=["message"]`);
   const data = await res.json();
   return new Response(JSON.stringify(data, null, 2), {
     headers: { 'Content-Type': 'application/json' }
