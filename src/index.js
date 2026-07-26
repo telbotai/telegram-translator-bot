@@ -101,7 +101,6 @@ async function handleInlineQuery(query, env) {
   }
 
   const result = await translateSmart(text);
-  const isPersian = PERSIAN_PATTERN.test(text);
 
   await answerInline(queryId, [{
     type: 'article', id: 'translation',
@@ -126,39 +125,48 @@ async function translateSmart(text) {
 
 // ─── ترجمه با fallback ───
 async function translateWithFallback(text, from, to) {
-  // تلاش ۱: MyMemory
-  const r1 = await translateMyMemory(text, from, to);
+  // تلاش ۱: Lingva Translate (رایگان، open-source)
+  const r1 = await translateLingva(text, from, to);
   if (r1) return r1;
 
-  // تلاش ۲: Google Translate (غیررسمی)
-  const r2 = await translateGoogle(text, from, to);
+  // تلاش ۲: Google Translate مستقیم
+  const r2 = await translateGoogleDirect(text, from, to);
   if (r2) return r2;
+
+  // تلاش ۳: LibreTranslate (عمومی)
+  const r3 = await translateLibre(text, from, to);
+  if (r3) return r3;
 
   return null;
 }
 
-// ─── MyMemory API ───
-async function translateMyMemory(text, from, to) {
+// ─── Lingva Translate (اولویت اول) ───
+async function translateLingva(text, from, to) {
   try {
-    const langPair = `${from}|${to}`;
-    // ایمیل = سقف بالاتر (50K در روز به جای 5K)
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langPair}&de=bot@uctranslate.com`;
+    // چندین instancia عمومی
+    const instances = [
+      'https://lingva.thedaviddelta.com',
+      'https://lingva.ml',
+      'https://lingva.kavin.rocks',
+    ];
 
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'TelegramBot/1.0' }
-    });
+    for (const base of instances) {
+      try {
+        const url = `${base}/api/v1/${from}/${to}/${encodeURIComponent(text)}`;
+        const res = await fetch(url, {
+          signal: AbortSignal.timeout(5000),
+          headers: { 'User-Agent': 'TelegramBot/1.0' }
+        });
 
-    if (res.status === 429) {
-      console.log('MyMemory rate limited, trying fallback');
-      return null;
-    }
-
-    if (!res.ok) return null;
-
-    const data = await res.json();
-    if (data.responseStatus === 200 && data.responseData) {
-      const result = data.responseData.translatedText;
-      if (result && result !== text) return result;
+        if (res.ok) {
+          const data = await res.json();
+          if (data.translation && data.translation !== text) {
+            return data.translation;
+          }
+        }
+      } catch (e) {
+        continue; // سعی کن اینستنس بعدی
+      }
     }
     return null;
   } catch (e) {
@@ -166,23 +174,60 @@ async function translateMyMemory(text, from, to) {
   }
 }
 
-// ─── Google Translate (غیررسمی، رایگان) ───
-async function translateGoogle(text, from, to) {
+// ─── Google Translate مستقیم ───
+async function translateGoogleDirect(text, from, to) {
   try {
-    const sl = from === 'auto' ? 'auto' : from;
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${to}&dt=t&q=${encodeURIComponent(text)}`;
-
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(text)}`;
     const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0' }
+      signal: AbortSignal.timeout(5000),
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
     });
 
     if (!res.ok) return null;
 
     const data = await res.json();
     if (data && data[0]) {
-      // ترکیب همه پاراگراف‌ها
       const translated = data[0].map(p => p[0]).join('');
       if (translated && translated !== text) return translated;
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// ─── LibreTranslate (عمومی) ───
+async function translateLibre(text, from, to) {
+  try {
+    const instances = [
+      'https://libretranslate.com',
+      'https://translate.fortytwo-it.com',
+    ];
+
+    for (const base of instances) {
+      try {
+        const url = `${base}/translate`;
+        const res = await fetch(url, {
+          method: 'POST',
+          signal: AbortSignal.timeout(5000),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            q: text,
+            source: from,
+            target: to,
+            format: 'text'
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.translatedText && data.translatedText !== text) {
+            return data.translatedText;
+          }
+        }
+      } catch (e) {
+        continue;
+      }
     }
     return null;
   } catch (e) {
