@@ -189,9 +189,10 @@ async function answerInline(queryId, results, env) {
 
 // ─── تنظیم Webhook ───
 async function setupWebhook(env) {
-  const workerUrl = env.WORKER_URL || `https://translator-bot.${env.CF_SUBDOMAIN || 'YOUR_SUBDOMAIN'}.workers.dev`;
+  // آدرس Worker رو از هدر Cloudflare بگیر
+  const workerUrl = env.WORKER_URL || `https://pm-f17.workers.dev`;
   const webhookUrl = `${workerUrl}${WEBHOOK_PATH}`;
-  const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
+  const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/setWebhook?url=${webhookUrl}&allowed_updates=["message","inline_query"]`);
   const data = await res.json();
   return new Response(JSON.stringify(data, null, 2), {
     headers: { 'Content-Type': 'application/json' }
