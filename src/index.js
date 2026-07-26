@@ -2,8 +2,6 @@
 // فارسی → انگلیسی | هر زبان دیگه → فارسی
 
 const WEBHOOK_PATH = '/webhook';
-
-// تشخیص فارسی/عربی
 const PERSIAN_PATTERN = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/;
 
 export default {
@@ -36,7 +34,6 @@ async function handleMessage(msg, env) {
   const text = msg.text;
   const chatType = msg.chat.type;
 
-  // ─── دستورات ───
   if (text && text.startsWith('/')) {
     const cmd = text.split('@')[0].split(' ')[0].toLowerCase();
 
@@ -50,29 +47,22 @@ async function handleMessage(msg, env) {
 • فارسی → انگلیسی
 • هر زبان دیگه → فارسی
 
-📌 گروه‌ها (وقتی ربات عضو هست):
+📌 گروه‌ها:
 ریپلای + /t → ترجمه
 
-📌 اینلاین (هر جا):
-@بات_نام متن
-ترجمه توی هر چتی نشون داده می‌شه!`, env);
+📌 اینلاین:
+@بات_نام متن`, env);
       return;
     }
 
     if (cmd === '/help') {
       await send(chatId, `📖 راهنما:
-
 🔹 چت خصوصی → خودکار
 🔹 گروه → ریپلای + /t
-🔹 اینلاین → @بات_نام متن
-
-🎯 قانون:
-فارسی → انگلیسی
-بقیه → فارسی`, env);
+🔹 اینلاین → @بات_نام متن`, env);
       return;
     }
 
-    // /t در گروه
     if (cmd === '/t') {
       if (chatType === 'group' || chatType === 'supergroup') {
         if (msg.reply_to_message && msg.reply_to_message.text) {
@@ -88,43 +78,36 @@ async function handleMessage(msg, env) {
     }
   }
 
-  // ─── پیام معمولی (فقط خصوصی) ───
+  // پیام معمولی (فقط خصوصی)
   if (text && chatType === 'private') {
     const result = await translateSmart(text);
     await send(chatId, result, env);
   }
 }
 
-// ─── حالت اینلاین ───
+// ─── اینلاین ───
 async function handleInlineQuery(query, env) {
   const text = query.query.trim();
   const queryId = query.id;
 
   if (!text) {
     await answerInline(queryId, [{
-      type: 'article',
-      id: 'help',
+      type: 'article', id: 'help',
       title: '🌐 ترجمه هوشمند',
       description: 'متن رو بنویسید تا ترجمه بشه',
-      input_message_content: {
-        message_text: '📝 متنی بنویسید بعد از @بات_نام'
-      }
+      input_message_content: { message_text: '📝 متنی بنویسید بعد از @بات_نام' }
     }], env);
     return;
   }
 
   const result = await translateSmart(text);
   const isPersian = PERSIAN_PATTERN.test(text);
-  const direction = isPersian ? 'فارسی → انگلیسی' : 'به فارسی';
 
   await answerInline(queryId, [{
-    type: 'article',
-    id: 'translation',
+    type: 'article', id: 'translation',
     title: `🌐 ${result.substring(0, 50)}`,
-    description: `${direction}: ${text.substring(0, 40)}...`,
-    input_message_content: {
-      message_text: `🌐 ${result}`
-    }
+    description: text.substring(0, 40),
+    input_message_content: { message_text: `🌐 ${result}` }
   }], env);
 }
 
@@ -132,57 +115,77 @@ async function handleInlineQuery(query, env) {
 async function translateSmart(text) {
   const isPersian = PERSIAN_PATTERN.test(text);
 
-  try {
-    if (isPersian) {
-      // فارسی → انگلیسی
-      const r = await translate(text, 'fa', 'en');
-      if (r) return r;
-    } else {
-      // انگلیسی → فارسی
-      const r = await translate(text, 'en', 'fa');
-      if (r) return r;
-
-      // اگه انگلیسی نبود، سعی کن با زبان دیگه
-      const r2 = await translate(text, 'auto', 'fa');
-      if (r2) return r2;
-    }
-  } catch (e) {
-    console.error('Translation error:', e);
+  if (isPersian) {
+    const r = await translateWithFallback(text, 'fa', 'en');
+    return r || '❌ خطا در ترجمه';
+  } else {
+    const r = await translateWithFallback(text, 'en', 'fa');
+    return r || '❌ خطا در ترجمه';
   }
-
-  return '❌ خطا در ترجمه';
 }
 
-// ─── MyMemory API (رایگان) ───
-async function translate(text, from, to) {
+// ─── ترجمه با fallback ───
+async function translateWithFallback(text, from, to) {
+  // تلاش ۱: MyMemory
+  const r1 = await translateMyMemory(text, from, to);
+  if (r1) return r1;
+
+  // تلاش ۲: Google Translate (غیررسمی)
+  const r2 = await translateGoogle(text, from, to);
+  if (r2) return r2;
+
+  return null;
+}
+
+// ─── MyMemory API ───
+async function translateMyMemory(text, from, to) {
   try {
     const langPair = `${from}|${to}`;
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langPair}`;
+    // ایمیل = سقف بالاتر (50K در روز به جای 5K)
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langPair}&de=bot@uctranslate.com`;
 
     const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'TelegramBot/1.0'
-      }
+      headers: { 'User-Agent': 'TelegramBot/1.0' }
     });
 
-    if (!res.ok) {
-      console.error('API error:', res.status);
+    if (res.status === 429) {
+      console.log('MyMemory rate limited, trying fallback');
       return null;
     }
 
-    const data = await res.json();
+    if (!res.ok) return null;
 
+    const data = await res.json();
     if (data.responseStatus === 200 && data.responseData) {
       const result = data.responseData.translatedText;
-      // بررسی کن ترجمه واقعی بوده
-      if (result && result !== text && result.length > 0) {
-        return result;
-      }
+      if (result && result !== text) return result;
     }
-
     return null;
   } catch (e) {
-    console.error('Fetch error:', e);
+    return null;
+  }
+}
+
+// ─── Google Translate (غیررسمی، رایگان) ───
+async function translateGoogle(text, from, to) {
+  try {
+    const sl = from === 'auto' ? 'auto' : from;
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${to}&dt=t&q=${encodeURIComponent(text)}`;
+
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    if (data && data[0]) {
+      // ترکیب همه پاراگراف‌ها
+      const translated = data[0].map(p => p[0]).join('');
+      if (translated && translated !== text) return translated;
+    }
+    return null;
+  } catch (e) {
     return null;
   }
 }
