@@ -1,6 +1,5 @@
 // Telegram Translation Bot - Cloudflare Workers
 // فارسی → انگلیسی | هر زبان دیگه → فارسی
-// پشتیبانی: چت خصوصی + گروه با /t + حالت اینلاین
 
 const WEBHOOK_PATH = '/webhook';
 
@@ -97,13 +96,10 @@ async function handleMessage(msg, env) {
 }
 
 // ─── حالت اینلاین ───
-// کاربر می‌نویسه: @بات_نام متن
-// ربات ترجمه رو به صورت نتیجه نشون می‌ده
 async function handleInlineQuery(query, env) {
   const text = query.query.trim();
   const queryId = query.id;
 
-  // اگه متنی وارد نشده
   if (!text) {
     await answerInline(queryId, [{
       type: 'article',
@@ -117,7 +113,6 @@ async function handleInlineQuery(query, env) {
     return;
   }
 
-  // ترجمه متن
   const result = await translateSmart(text);
   const isPersian = PERSIAN_PATTERN.test(text);
   const direction = isPersian ? 'فارسی → انگلیسی' : 'به فارسی';
@@ -137,26 +132,57 @@ async function handleInlineQuery(query, env) {
 async function translateSmart(text) {
   const isPersian = PERSIAN_PATTERN.test(text);
 
-  if (isPersian) {
-    const r = await translate(text, 'fa', 'en');
-    return r || '❌ خطا در ترجمه';
-  } else {
-    const r = await translate(text, 'auto', 'fa');
-    return r || '❌ خطا در ترجمه';
+  try {
+    if (isPersian) {
+      // فارسی → انگلیسی
+      const r = await translate(text, 'fa', 'en');
+      if (r) return r;
+    } else {
+      // انگلیسی → فارسی
+      const r = await translate(text, 'en', 'fa');
+      if (r) return r;
+
+      // اگه انگلیسی نبود، سعی کن با زبان دیگه
+      const r2 = await translate(text, 'auto', 'fa');
+      if (r2) return r2;
+    }
+  } catch (e) {
+    console.error('Translation error:', e);
   }
+
+  return '❌ خطا در ترجمه';
 }
 
 // ─── MyMemory API (رایگان) ───
 async function translate(text, from, to) {
   try {
-    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${to}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.responseStatus === 200 && data.responseData) {
-      return data.responseData.translatedText;
+    const langPair = `${from}|${to}`;
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langPair}`;
+
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'TelegramBot/1.0'
+      }
+    });
+
+    if (!res.ok) {
+      console.error('API error:', res.status);
+      return null;
     }
+
+    const data = await res.json();
+
+    if (data.responseStatus === 200 && data.responseData) {
+      const result = data.responseData.translatedText;
+      // بررسی کن ترجمه واقعی بوده
+      if (result && result !== text && result.length > 0) {
+        return result;
+      }
+    }
+
     return null;
   } catch (e) {
+    console.error('Fetch error:', e);
     return null;
   }
 }
@@ -189,7 +215,6 @@ async function answerInline(queryId, results, env) {
 
 // ─── تنظیم Webhook ───
 async function setupWebhook(env) {
-  // آدرس Worker
   const workerUrl = env.WORKER_URL || `https://uctranslate.hadis-vpm-f17.workers.dev`;
   const webhookUrl = `${workerUrl}${WEBHOOK_PATH}`;
   const res = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/setWebhook?url=${webhookUrl}&allowed_updates=["message","inline_query"]`);
